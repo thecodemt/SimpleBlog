@@ -1,0 +1,185 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider        = "prisma-client-js"
+  output          = "../app/generated/prisma"
+  previewFeatures = ["partialIndexes"]
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ======================================
+// 枚举类型定义
+// ======================================
+
+// 用户角色枚举：admin(全部权限) > editor(编辑权限) > viewer(阅读权限)
+enum UserRole {
+  admin
+  editor
+  viewer
+}
+
+// 评论状态枚举：pending(待审核) -> approved(已批准) / rejected(已拒绝)
+enum CommentStatus {
+  pending
+  approved
+  rejected
+}
+
+// ======================================
+// Models
+// ======================================
+
+// 用户表：存储所有系统用户信息
+model User {
+  id        String   @id @default(uuid())
+  name      String   @db.VarChar(100)
+  email     String   @unique @db.VarChar(255)
+  password  String   @db.VarChar(255)
+  avatar    String?  @db.VarChar(255)
+  isActive  Boolean  @default(true) @map("is_active")
+  role      UserRole @default(viewer)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  posts     Post[]
+  comments  Comment[]
+  postLikes PostLike[]
+
+  @@map("users")
+}
+
+// 分类表
+model Category {
+  id          String   @id @default(uuid())
+  name        String   @unique @db.VarChar(100)
+  slug        String   @unique @db.VarChar(100)
+  description String?  @db.Text
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  posts Post[]
+
+  @@map("categories")
+}
+
+// 文章表：博客文章的核心内容存储
+model Post {
+  id          String    @id @default(uuid())
+  title       String    @db.VarChar(255)
+  slug        String    @unique @db.VarChar(255)
+  content     String    @db.Text
+  excerpt     String?   @db.Text
+  coverImage  String?   @db.VarChar(255) @map("cover_image")
+  published   Boolean   @default(false)
+  publishedAt DateTime? @map("published_at")
+  viewCount   Int       @default(0) @map("view_count")
+  deletedAt   DateTime? @map("deleted_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  // Foreign Keys
+  authorId   String    @map("author_id")
+  categoryId String?   @map("category_id")
+
+  // Relations
+  author     User         @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  category   Category?    @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  comments   Comment[]
+  postLikes  PostLike[]
+  tags       PostTag[]
+
+  // Indexes
+  @@index([slug])
+  @@index([authorId])
+  @@index([categoryId])
+  @@index([published, publishedAt(sort: Desc)])
+  @@index([deletedAt])
+  @@map("posts")
+}
+
+// 评论表：支持已登录用户和匿名访客的评论
+model Comment {
+  id         String        @id @default(uuid())
+  content    String        @db.Text
+  guestName  String?       @map("guest_name") @db.VarChar(100)
+  guestEmail String?       @map("guest_email") @db.VarChar(255)
+  status     CommentStatus @default(pending)
+  deletedAt  DateTime?     @map("deleted_at")
+  createdAt  DateTime      @default(now()) @map("created_at")
+  updatedAt  DateTime      @updatedAt @map("updated_at")
+
+  // Foreign Keys
+  postId String @map("post_id")
+  userId  String? @map("user_id")
+
+  // Relations
+  post Post  @relation(fields: [postId], references: [id], onDelete: Cascade)
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  // Constraints: 登录用户或匿名用户二选一
+  @@index([postId])
+  @@index([userId])
+  @@index([status])
+  @@index([deletedAt])
+  @@map("comments")
+}
+
+// 标签表
+model Tag {
+  id        String   @id @default(uuid())
+  name      String   @unique @db.VarChar(100)
+  slug      String   @unique @db.VarChar(100)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  posts PostTag[]
+
+  @@map("tags")
+}
+
+// 点赞表：支持已登录用户和匿名访客的点赞
+model PostLike {
+  id        String   @id @default(uuid())
+  guestIp   String?  @map("guest_ip") @db.VarChar(45)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  // Foreign Keys
+  postId String  @map("post_id")
+  userId  String? @map("user_id")
+
+  // Relations
+  post Post  @relation(fields: [postId], references: [id], onDelete: Cascade)
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  // Constraints: 用户或IP地址二选一
+  @@index([postId])
+  @@index([userId])
+  @@unique([postId, userId], where: { userId: { not: null } })
+  @@unique([postId, guestIp], where: { guestIp: { not: null } })
+  @@map("post_likes")
+}
+
+// 文章标签关联表 (Many-to-Many)
+model PostTag {
+  postId String @map("post_id")
+  tagId  String @map("tag_id")
+
+  // Relations
+  post Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+  tag  Tag  @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([postId, tagId])
+  @@index([postId])
+  @@index([tagId])
+  @@map("post_tags")
+}
